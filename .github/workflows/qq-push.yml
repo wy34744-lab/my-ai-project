@@ -1,0 +1,80 @@
+name: Push new qq-push issues to QQ group
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  push-to-qq:
+    if: >-
+      github.event.issue.user.login == github.repository_owner &&
+      contains(join(github.event.issue.labels.*.name, ','), 'qq-push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
+      QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
+      QQ_GROUP_OPENID: ${{ secrets.QQ_GROUP_OPENID }}
+      GITHUB_EVENT_PATH: ${{ github.event_path }}
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Send Issue body to QQ group
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          def required(name):
+              value = os.environ.get(name, '').strip()
+              if not value:
+                  raise RuntimeError(f'Missing required environment variable: {name}')
+              return value
+
+          def post_json(url, payload, headers=None):
+              body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+              request = urllib.request.Request(
+                  url, data=body,
+                  headers={'Content-Type': 'application/json', **(headers or {})},
+                  method='POST')
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      raw = response.read().decode('utf-8')
+                      return json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as error:
+                  details = error.read().decode('utf-8', errors='replace')
+                  raise RuntimeError(f'HTTP {error.code} from {url}: {details}') from error
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as f:
+              event = json.load(f)
+          issue = event.get('issue', {})
+          content = (issue.get('body') or '').strip() or (issue.get('title') or '').strip()
+          if not content:
+              raise RuntimeError('Issue body and title are both empty')
+
+          token = post_json(
+              'https://bots.qq.com/app/getAppAccessToken',
+              {'appId': required('QQ_APP_ID'), 'clientSecret': required('QQ_APP_SECRET')}
+          ).get('access_token')
+          if not token:
+              raise RuntimeError('QQ token response did not contain access_token')
+
+          result = post_json(
+              f"https://api.sgroup.qq.com/v2/groups/{required('QQ_GROUP_OPENID')}/messages",
+              {'content': content, 'msg_type': 0},
+              {'Authorization': f'QQBot {token}'}
+          )
+          print(f"QQ push succeeded for Issue #{issue.get('number')}: {result}")
+          PY
