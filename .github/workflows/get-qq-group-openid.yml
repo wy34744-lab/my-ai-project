@@ -1,0 +1,54 @@
+name: Get QQ Group OpenID
+
+on:
+  workflow_dispatch:
+
+jobs:
+  get-group-id:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install QQ Bot SDK
+        run: pip install qq-botpy
+
+      - name: Listen for QQ group message
+        env:
+          QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
+          QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import botpy
+          from botpy.message import GroupMessage
+
+          class MyClient(botpy.Client):
+
+              async def on_ready(self):
+                  print("机器人已连接。现在去目标QQ群 @机器人 发送：测试", flush=True)
+
+              async def on_group_at_message_create(self, message: GroupMessage):
+                  print("", flush=True)
+                  print("=================================", flush=True)
+                  print("QQ_GROUP_OPENID=" + message.group_openid, flush=True)
+                  print("=================================", flush=True)
+                  print("已经获取成功，可以停止任务。", flush=True)
+
+                  sys.stdout.flush()
+                  os._exit(0)
+
+          intents = botpy.Intents(public_messages=True)
+
+          client = MyClient(intents=intents)
+
+          client.run(
+              appid=os.environ["QQ_APP_ID"],
+              secret=os.environ["QQ_APP_SECRET"]
+          )
+          PY
